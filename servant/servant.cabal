@@ -46,6 +46,7 @@ library
     Servant.API.Empty
     Servant.API.Experimental.Auth
     Servant.API.Header
+    Servant.API.Required
     Servant.API.HttpVersion
     Servant.API.Internal.Test.ComprehensiveAPI
     Servant.API.IsSecure
