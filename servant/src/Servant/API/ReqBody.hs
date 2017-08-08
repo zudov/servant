@@ -16,7 +16,7 @@ import           Servant.API.Required (Required(..))
 -- >>> type MyApi = "books" :> ReqBody '[JSON] Book :> Post '[JSON] Book
 type ReqBody a = ReqBody' 'Required a
 
--- | Extract the request body (if it's provided) as a value of type @Maybe a@.
+-- | Extract the request body (if it's provided) as a value of type @Provided a@.
 --
 -- Example:
 --
