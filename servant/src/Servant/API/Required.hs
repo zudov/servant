@@ -1,6 +1,10 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE GADTs #-}
 module Servant.API.Required where
 
@@ -25,6 +29,26 @@ data Provided (r :: Required) a where
 deriving instance Show a => Show (Provided r a)
 deriving instance Eq   a => Eq   (Provided r a)
 deriving instance Ord  a => Ord  (Provided r a)
+
+deriving instance Functor     (Provided r)
+deriving instance Foldable    (Provided r)
+deriving instance Traversable (Provided r)
+
+instance Applicative (Provided 'Required) where
+  pure = Provided
+  Provided f <*> Provided a = Provided (f a)
+
+instance Applicative (Provided 'NotRequired) where
+  pure = Provided
+  Provided f <*> Provided a = Provided (f a)
+  _ <*> _ = NotProvided
+
+instance Monad (Provided 'Required) where
+  Provided a >>= f = f a
+
+instance Monad (Provided 'NotRequired) where
+  Provided a  >>= f = f a
+  NotProvided >>= _ = NotProvided
 
 deriving instance Typeable Provided
 deriving instance Typeable (Provided r)
