@@ -18,6 +18,8 @@ module Servant.API (
   module Servant.API.QueryParam,
   -- | Retrieving parameters from the query string of the 'URI': @'QueryParam'@
   module Servant.API.ReqBody,
+  -- | Handling of required/optional parameters
+  module Servant.API.Required,
   -- | Accessing the request body as a JSON-encoded type: @'ReqBody'@
   module Servant.API.RemoteHost,
   -- | Retrieving the IP of the client
@@ -81,7 +83,8 @@ import           Servant.API.QueryParam      (QueryFlag, QueryParam,
                                               QueryParams)
 import           Servant.API.Raw             (Raw)
 import           Servant.API.RemoteHost      (RemoteHost)
-import           Servant.API.ReqBody         (ReqBody)
+import           Servant.API.ReqBody         (ReqBody, ReqBody', OptionalReqBody)
+import           Servant.API.Required        (Required(..), Provided(..))
 import           Servant.API.ResponseHeaders (AddHeader, addHeader, noHeader,
                                               BuildHeadersTo (buildHeadersTo),
                                               GetHeaders (getHeaders),
