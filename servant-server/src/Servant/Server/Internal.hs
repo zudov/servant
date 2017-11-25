@@ -26,12 +26,13 @@ module Servant.Server.Internal
   , module Servant.Server.Internal.ServantErr
   ) where
 
+import           Control.Applicative        ((<|>))
 import           Control.Monad.Trans        (liftIO)
 import           Control.Monad.Trans.Resource (runResourceT)
 import qualified Data.ByteString            as B
 import qualified Data.ByteString.Char8      as BC8
 import qualified Data.ByteString.Lazy       as BL
-import           Data.Maybe                 (fromMaybe, mapMaybe)
+import           Data.Maybe                 (fromMaybe, mapMaybe, isJust)
 import           Data.Either                (partitionEithers)
 import           Data.String                (fromString)
 import           Data.String.Conversions    (cs, (<>))
@@ -41,6 +42,7 @@ import           Data.Typeable
 import           GHC.TypeLits               (KnownNat, KnownSymbol, natVal,
                                              symbolVal)
 import           Network.HTTP.Types         hiding (Header, ResponseHeaders)
+import           Network.HTTP.Types.Header  (hTransferEncoding)
 import           Network.Socket             (SockAddr)
 import           Network.Wai                (Application, Request,
                                              httpVersion, isSecure,
@@ -59,7 +61,8 @@ import           Servant.API                 ((:<|>) (..), (:>), BasicAuth, Capt
                                               ReflectMethod(reflectMethod),
                                               IsSecure(..), Header, QueryFlag,
                                               QueryParam, QueryParams, Raw,
-                                              RemoteHost, ReqBody, Vault,
+                                              RemoteHost, ReqBody', Vault,
+                                              Required(..),Provided(..),
                                               WithNamedContext,
                                               Description, Summary)
 import           Servant.API.ContentTypes    (AcceptHeader (..),
@@ -478,9 +481,9 @@ instance HasServer Raw context where
 -- >   where postBook :: Book -> Handler Book
 -- >         postBook book = ...insert into your db...
 instance ( AllCTUnrender list a, HasServer api context
-         ) => HasServer (ReqBody list a :> api) context where
+         ) => HasServer (ReqBody' 'Required list a :> api) context where
 
-  type ServerT (ReqBody list a :> api) m =
+  type ServerT (ReqBody' 'Required list a :> api) m =
     a -> ServerT api m
 
   hoistServerWithContext _ pc nt s = hoistServerWithContext (Proxy :: Proxy api) pc nt . s
@@ -507,6 +510,79 @@ instance ( AllCTUnrender list a, HasServer api context
         case mrqbody of
           Left e  -> delayedFailFatal err400 { errBody = cs e }
           Right v -> return v
+
+instance ( AllCTUnrender list a, HasServer api context
+         ) => HasServer (ReqBody' 'NotRequired list a :> api) context where
+
+  type ServerT (ReqBody' 'NotRequired list a :> api) m =
+    Provided 'NotRequired a -> ServerT api m
+
+  hoistServerWithContext _ pc nt s =
+    hoistServerWithContext (Proxy :: Proxy api) pc nt . s
+
+  route Proxy context subserver
+    = route (Proxy :: Proxy api) context $
+         addBodyCheck subserver
+             (withRequest headersCheck)
+             (traverse $ withRequest . bodyCheck)
+    where
+      -- inspects the headers of a request and if they indicate that
+      -- the body is present returns a decoding function
+      headersCheck
+        :: Request
+        -> DelayedIO (Provided 'NotRequired (BL.ByteString -> Either String a))
+      headersCheck request
+        -- if headers indicate that the body is present and it's not empty
+        | hasMessageBody && not isEmptyMessageBody =
+            -- provide a decoding function
+            Provided <$> getContentHandler
+        | otherwise =
+            pure NotProvided
+        where
+          headers h = h `lookup` requestHeaders request
+          hContentType_      = headers hContentType
+          hContentLength_    = headers hContentLength
+          hTransferEncoding_ = headers hTransferEncoding
+
+          -- https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html
+          -- 4.3 Message body
+          -- > The presence of a message-body in a request is
+          -- > signaled by the inclusion of a Content-Length
+          -- > or Transfer-Encoding header field in the request's
+          -- > message-headers.
+          hasMessageBody =
+            isJust (hContentLength_ <|> hTransferEncoding_)
+
+          -- message body is considered empty only if the sender
+          -- indicates it explicitly via 'Content-Length: 0'
+          isEmptyMessageBody
+            | Just contentLength <- hContentLength_
+            , Right (n :: Int)   <- parseHeader contentLength
+            , n <= 0 = True
+            | otherwise = False
+
+          -- when Content-Type is not provided we assume it's octet-stream
+          -- http://tools.ietf.org/html/rfc7231#section-3.1.1.5 RFC7231
+          orOctetStream = fromMaybe "application/octet-stream"
+
+          getContentHandler
+            :: DelayedIO (BL.ByteString -> Either String a)
+          getContentHandler =
+             maybe (delayedFailFatal err415) pure
+               $ canHandleCTypeH (Proxy :: Proxy list)
+               $ BL.fromStrict
+               $ orOctetStream hContentType_
+
+      bodyCheck
+        :: (BL.ByteString -> Either String a)
+        -> Request
+        -> DelayedIO a
+      bodyCheck contentHandler request = do
+        body <- liftIO $ lazyRequestBody request
+        case contentHandler body of
+          Left e -> delayedFailFatal err400
+            { errBody = cs e }
+          Right a -> pure a
 
 -- | Make sure the incoming request starts with @"/path"@, strip it and
 -- pass the rest of the request path to @api@.
