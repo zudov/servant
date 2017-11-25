@@ -24,14 +24,22 @@ newtype Greet = Greet { _msg :: Text }
 instance FromJSON Greet
 instance ToJSON Greet
 
+data HelloParams = HelloParams
+  { _capital :: Bool }
+  deriving (Generic, Show)
+
+instance FromJSON HelloParams
+
 -- API specification
 type TestApi =
        -- GET /hello/:name?capital={true, false}  returns a Greet as JSON
-       "hello" :> Capture "name" Text :> QueryParam "capital" Bool :> Get '[JSON] Greet
+       "hello" :> Capture "name" Text :> QueryParam "capital" Bool
+               :> ReqBody' 'NotRequired '[JSON] HelloParams
+               :> Get '[JSON] Greet
 
        -- POST /greet with a Greet as JSON in the request body,
        --             returns a Greet as JSON
-  :<|> "greet" :> ReqBody '[JSON] Greet :> Post '[JSON] Greet
+  :<|> "greet" :> ReqBody' 'Required '[JSON] Greet :> Post '[JSON] Greet
 
        -- DELETE /greet/:greetid
   :<|> "greet" :> Capture "greetid" Text :> Delete '[JSON] NoContent
@@ -48,9 +56,11 @@ testApi = Proxy
 server :: Server TestApi
 server = helloH :<|> postGreetH :<|> deleteGreetH
 
-  where helloH name Nothing = helloH name (Just False)
-        helloH name (Just False) = return . Greet $ "Hello, " <> name
-        helloH name (Just True) = return . Greet . toUpper $ "Hello, " <> name
+  where helloH name Nothing      NotProvided = helloH name (Just False) NotProvided
+        helloH name Nothing     (Provided p) = helloH name (Just (_capital p)) NotProvided
+        helloH name (Just c)     Provided{}  = helloH name (Just c)  NotProvided
+        helloH name (Just False) NotProvided = return . Greet $ "Hello, " <> name
+        helloH name (Just True)  NotProvided = return . Greet . toUpper $ "Hello, " <> name
 
         postGreetH greet = return greet
 
